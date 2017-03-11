@@ -56,7 +56,7 @@ public:
         status=isEmpty;
     }
 
-    template<typename T1>
+    template<typename T1,typename = typename std::enable_if<!std::is_same<typename std::decay<T1>::type, my_any>::value>::type>
     my_any(const T1& value) {
         typedef typename std::remove_cv<const T1>::type nT1;
         if (sizeof(temp_holder<nT1>) <= MAX_SIZE){
@@ -72,10 +72,32 @@ public:
             new(&storageH) temp_holder<nT1> *(new temp_holder<nT1>(value));
             deleter = [](void *currentStorage) { delete (*((temp_holder<nT1>**)currentStorage)); };//destructor of link of storage
             copier = [](void * curSt,const void * othSt){
-                new (curSt) temp_holder<nT1>* (new temp_holder<nT1>((*((temp_holder<nT1>**)othSt))->valueH));
+                new (curSt) temp_holder<nT1>* (new temp_holder<nT1>(std::forward<nT1>((*((temp_holder<nT1>**)othSt))->valueH)));
             };
         }
     }
+
+    template<typename T2, typename = typename std::enable_if<!std::is_same<typename std::decay<T2>::type, my_any>::value>::type>
+    my_any(T2&& value) {
+        typedef typename std::remove_cv<typename std::decay<const T2>::type>::type nT1;
+        if (sizeof(temp_holder<nT1>) <= MAX_SIZE){
+            status = isSmall;
+            new(&storageH) temp_holder<nT1>(temp_holder<nT1>(std::forward<nT1>(value)));
+            deleter = [](void* currentStorage){((temp_holder<nT1>*)currentStorage)->~temp_holder<nT1>();};//destructor of container
+            copier = [](void* curSt,const void* othSt){
+                new(curSt) temp_holder<nT1>(temp_holder<nT1>(std::forward<nT1>(((temp_holder<nT1>*)othSt)->valueH)));
+            };
+        }
+        else {
+            status = isBig;
+            new(&storageH) temp_holder<nT1> *(new temp_holder<nT1>(std::forward<nT1>(value)));
+            deleter = [](void *currentStorage) { delete (*((temp_holder<nT1>**)currentStorage)); };//destructor of link of storage
+            copier = [](void * curSt,const void * othSt){
+                new (curSt) temp_holder<nT1>* (new temp_holder<nT1>(std::forward<nT1>((*((temp_holder<nT1>**)othSt))->valueH)));
+            };
+        }
+    }
+
 
     my_any (my_any && other):status(other.status),deleter(other.deleter), copier(other.copier){
         other.copier(&storageH,std::move(&other.storageH));
@@ -118,12 +140,12 @@ public:
     T3 cast() {
         if (status==isSmall) {
             if (reinterpret_cast<any_holder*>(&storageH)->type()!= typeid(T3))
-                throw "wrong type cast";
+                throw std::bad_cast();//"wrong type cast";//std::bad_cast;
             return ((temp_holder<T3>*)(&storageH))->valueH;
         }
         if (status==isBig){
             if ((*reinterpret_cast<any_holder**>(&storageH))->type()!= typeid(T3))
-                throw "wrong type cast";
+                throw std::bad_cast();
             return (*(temp_holder<T3>**)(&storageH))->valueH;
         }
         return NULL;
@@ -145,10 +167,10 @@ void swap (my_any& a, my_any& b){
 
 template <typename T>
 T* any_cast(my_any* oper){
-        my_any::any_holder * tmpPointer= reinterpret_cast<my_any::any_holder*>(oper->holderPointer());
+    my_any::any_holder * tmpPointer= reinterpret_cast<my_any::any_holder*>(oper->holderPointer());
     if (tmpPointer->type()== typeid(T))
         return &(reinterpret_cast<my_any::temp_holder<T>*>(tmpPointer))->valueH;
-    return nullptr;
+    throw std::bad_cast();
 
 }
 template <typename T>
