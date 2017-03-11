@@ -61,7 +61,7 @@ public:
     template<typename T1,typename = typename std::enable_if<!std::is_same<typename std::decay<T1>::type, my_any>::value>::type>
     my_any(const T1& value) {
         typedef typename std::remove_cv<const T1>::type nT1;
-        if (sizeof(temp_holder<nT1>) <= MAX_SIZE){
+        if (sizeof(temp_holder<nT1>) <= MAX_SIZE && std::is_nothrow_copy_constructible<nT1>::value){
             status = isSmall;
             new(&storageH) temp_holder<nT1>(temp_holder<nT1>(value));
             deleter = [](void* currentStorage){((temp_holder<nT1>*)currentStorage)->~temp_holder<nT1>();};//destructor of container
@@ -90,7 +90,7 @@ public:
     template<typename T2, typename = typename std::enable_if<!std::is_same<typename std::decay<T2>::type, my_any>::value>::type>
     my_any(T2&& value) {
         typedef typename std::remove_cv<typename std::decay<const T2>::type>::type nT1;
-        if (sizeof(temp_holder<nT1>) <= MAX_SIZE){
+        if (sizeof(temp_holder<nT1>) <= MAX_SIZE/*&&std::is_nothrow_copy_constructible<nT1>::value*/){
             status = isSmall;
             new(&storageH) temp_holder<nT1>(temp_holder<nT1>(std::forward<nT1>(value)));
             deleter = [](void* currentStorage){((temp_holder<nT1>*)currentStorage)->~temp_holder<nT1>();};//destructor of container
@@ -129,11 +129,14 @@ public:
 
     //\creation
     my_any& swap(my_any& other) {
-
-        typename std::aligned_storage<MAX_SIZE, MAX_SIZE>::type temporalStorageH;
-        mover(&temporalStorageH,&storageH,[](void*){});
-        other.mover(&storageH,&other.storageH,deleter);
-        mover(&other.storageH,&temporalStorageH,other.deleter);
+        if (status==isSmall||other.status==isSmall) {
+            typename std::aligned_storage<MAX_SIZE, MAX_SIZE>::type temporalStorageH;
+            mover(&temporalStorageH, &storageH, [](void *) { });
+            other.mover(&storageH, &other.storageH, deleter);
+            mover(&other.storageH, &temporalStorageH, other.deleter);
+        }else{
+            std::swap(storageH,other.storageH);
+        }
 
         std::swap(status,other.status);
         std::swap(deleter,other.deleter);
