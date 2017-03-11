@@ -90,7 +90,7 @@ public:
     template<typename T2, typename = typename std::enable_if<!std::is_same<typename std::decay<T2>::type, my_any>::value>::type>
     my_any(T2&& value) {
         typedef typename std::remove_cv<typename std::decay<const T2>::type>::type nT1;
-        if (sizeof(temp_holder<nT1>) <= MAX_SIZE/*&&std::is_nothrow_copy_constructible<nT1>::value*/){
+        if (sizeof(temp_holder<nT1>) <= MAX_SIZE && std::is_nothrow_copy_constructible<nT1>::value){
             status = isSmall;
             new(&storageH) temp_holder<nT1>(temp_holder<nT1>(std::forward<nT1>(value)));
             deleter = [](void* currentStorage){((temp_holder<nT1>*)currentStorage)->~temp_holder<nT1>();};//destructor of container
