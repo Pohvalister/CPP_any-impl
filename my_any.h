@@ -17,6 +17,7 @@ private :
     //holdingStruct
     struct any_holder {
         virtual const std::type_info& type() const = 0;
+        virtual ~any_holder(){};
     };
 
     template<typename T>
@@ -38,23 +39,36 @@ private :
     storType storageH;
     storage_status status;
     void (*copier)(void*,void const*);
-    void (*mover) (void*,void const*,void (*)(void*));
+    void (*mover) (void*,void *,void (*)(void*));
     void (*deleter)(void*);
     //\placement
 
 public:
-    void* holderPointer(){
-
+    void* holderPointer() const{
         if (status==isSmall){
-            return (reinterpret_cast<void*>(&storageH));
+            return (void*)&storageH;
         }
         if (status==isBig){
             return *(void**)&storageH;
         }
         return nullptr;
     }
+    const std::type_info& type() const{
+        void * tmp2 = holderPointer();
+        my_any::any_holder *tmpPointer = reinterpret_cast<my_any::any_holder*>(tmp2);
+        return tmpPointer->type();
+    }
+    template <typename T>
+    void* dataPtr() const{
+        if (status==isSmall)
+            return (void*)(&(((temp_holder<T>*)&storageH)->valueH));
+        if (status==isBig)
+            return (void*)(&((*(temp_holder<T>**)&storageH)->valueH));
+        return nullptr;
+    }
+
     //creation
-    my_any():deleter([](void*){}),copier([](void*,void const*){}),mover([](void*,void const*,void(*)(void*)){}){
+    my_any():deleter([](void*){}),copier([](void*,void const*){}),mover([](void*,void *,void(*)(void*)){}){
         status=isEmpty;
     }
 
@@ -68,7 +82,7 @@ public:
             copier = [](void* curSt,const void* othSt){
                 new(curSt) temp_holder<nT1>(temp_holder<nT1>(((temp_holder<nT1>*)othSt)->valueH));
             };
-            mover = [](void* curSt,const void* othSt,void (*deler)(void*)){
+            mover = [](void* curSt,void* othSt,void (*deler)(void*)){
                 deler(curSt);
                 new(curSt) temp_holder<nT1>(temp_holder<nT1>(std::move(((temp_holder<nT1>*)othSt)->valueH)));
             };
@@ -77,12 +91,15 @@ public:
             status = isBig;
             new(&storageH) temp_holder<nT1> *(new temp_holder<nT1>(value));
             deleter = [](void *currentStorage) { delete (*((temp_holder<nT1>**)currentStorage)); };//destructor of link of storage
+
             copier = [](void * curSt,const void * othSt){
                 new (curSt) temp_holder<nT1>* (new temp_holder<nT1>((*((temp_holder<nT1>**)othSt))->valueH));
             };
-            mover= [](void * curSt,const void * othSt, void (*deler)(void*)){
+
+            mover= [](void * curSt,void * othSt, void (*deler)(void*)){
                 deler (curSt);
-                std::swap(*((storType*)curSt),*((storType*)othSt));//new (curSt) temp_holder<nT1>* (new temp_holder<nT1>(std::move((*((temp_holder<nT1>**)othSt))->valueH)));
+                new (curSt) temp_holder<nT1>*(nullptr);
+                std::swap(*(storType*)curSt,*(storType*)othSt);//new (curSt) temp_holder<nT1>* (new temp_holder<nT1>(std::move((*((temp_holder<nT1>**)othSt))->valueH)));
             };
         }
     }
@@ -97,7 +114,7 @@ public:
             copier = [](void* curSt,const void* othSt){
                 new(curSt) temp_holder<nT1>(temp_holder<nT1>(((temp_holder<nT1>*)othSt)->valueH));
             };
-            mover = [](void* curSt,const void* othSt, void (*deler)(void*)){
+            mover = [](void* curSt,void* othSt, void (*deler)(void*)){
                 deler(curSt);
                 new(curSt) temp_holder<nT1>(temp_holder<nT1>(std::move(((temp_holder<nT1>*)othSt)->valueH)));
             };
@@ -107,10 +124,11 @@ public:
             new(&storageH) temp_holder<nT1> *(new temp_holder<nT1>(std::forward<nT1>(value)));
             deleter = [](void *currentStorage) { delete (*((temp_holder<nT1>**)currentStorage)); };//destructor of link of storage
             copier = [](void * curSt,const void * othSt){
-                new (curSt) temp_holder<nT1>* (new temp_holder<nT1>((*((temp_holder<nT1>**)othSt))->valueH));
+                new(curSt) temp_holder<nT1>* (new temp_holder<nT1>((*((temp_holder<nT1>**)othSt))->valueH));
             };
-            mover= [](void * curSt,const void * othSt,void (*deler)(void*)){
+            mover= [](void * curSt,void * othSt,void (*deler)(void*)){
                 deler(curSt);
+                new(curSt) temp_holder<nT1>*(nullptr);
                 std::swap(*((storType*)curSt),*((storType*)othSt));//(*reinterpret_cast<typename std::aligned_storage<MAX_SIZE, MAX_SIZE>::type*>(curSt))(std::move(*othSt));//new (curSt) temp_holder<nT1>* (new temp_holder<nT1>(std::move((*((temp_holder<nT1>**)othSt))->valueH)));
             };
         }
@@ -118,7 +136,7 @@ public:
 
 
     my_any (my_any && other):status(other.status),deleter(other.deleter), copier(other.copier),mover(other.mover){
-        other.mover(&storageH,&other.storageH,deleter);
+        other.mover(&storageH,&other.storageH,[](void*){});
     }
     my_any (const my_any &other):status(other.status),deleter(other.deleter),copier(other.copier),mover(other.mover){
         other.copier(&storageH,&other.storageH);
@@ -128,6 +146,7 @@ public:
     }
 
     //\creation
+
     my_any& swap(my_any& other) {
         if (status==isSmall||other.status==isSmall) {
             typename std::aligned_storage<MAX_SIZE, MAX_SIZE>::type temporalStorageH;
@@ -146,7 +165,7 @@ public:
     }
     template <typename T>
     my_any& operator=(T&& other) {
-        my_any(std::move(other)).swap(*this);
+        my_any(std::forward<T>(other)).swap(*this);
         return *this;
     }
 
@@ -194,28 +213,40 @@ void swap (my_any& a, my_any& b){
 
 template <typename T>
 T* any_cast(my_any* oper){
-    my_any::any_holder * tmpPointer= reinterpret_cast<my_any::any_holder*>(oper->holderPointer());
-    if (tmpPointer->type()== typeid(T))
-        return &(reinterpret_cast<my_any::temp_holder<T>*>(tmpPointer))->valueH;
-    throw std::bad_cast();
+    if (oper->empty()||oper->type()!= typeid(T))
+        return nullptr;
+
+      return (T*)oper->dataPtr<T>();
+    //throw std::bad_cast();
 
 }
 template <typename T>
 const T* any_cast(const my_any* oper){
-    return any_cast<T>(const_cast<my_any*>(oper));
+    if (oper->empty()||oper->type()!= typeid(T))
+        return nullptr;
+    return (const T*)oper->dataPtr<T>();
 }
 template <typename T>
 T any_cast(my_any& oper){
     typedef typename std::remove_reference<T>::type tmpT;
-    return *any_cast<tmpT>(&oper);
+    if (oper.empty()||oper.type()!= typeid(T))
+        throw std::bad_cast();
+    return *((tmpT*)(oper.dataPtr<T>()));
 }
 template <typename T>
-T any_cast(const my_any& oper){
-    return any_cast<const typename std ::remove_reference<T>::type &>(const_cast<my_any&>(oper));
+T any_cast(const my_any& oper) {
+    typedef typename std::remove_reference<T>::type tmpT;
+    if (oper.empty() || oper.type() != typeid(T))
+        throw std::bad_cast();
+    return *((tmpT *) (oper.dataPtr<T>()));
 }
+
 template <typename T>
 T any_cast(my_any&& oper){
-    return any_cast<T>(oper);
+    typedef typename std::add_const<typename std::remove_reference<T>::type>::type tmpT;
+    if (oper.empty()||oper.type()!= typeid(T))
+        throw std::bad_cast();
+    return *((tmpT*)(oper.dataPtr<T>()));
 }
 
 #endif
